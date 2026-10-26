@@ -6,13 +6,13 @@ const copy = {
   da: {
     title: 'Lyddesigner', navLabel: 'Hovednavigation', nav: { forside: 'Forside', bio: 'Bio', kontakt: 'Kontakt', vaerker: 'Værker' }, identity: 'LYDDESIGNER',
     homeEyebrow: 'LYDDESIGN / PORTFOLIO', homeTitle: ['Skru op.', 'Lyt efter.'], intro: 'Lyddesign til film, podcast, computerspil og musik.', heroLink: 'Lyt til værkerne ', footer: ['FILM · PODCAST · SPIL · MUSIK', 'LYT. MÆRK. OPLEV.'],
-    worksEyebrow: 'UDVALGTE PRODUKTIONER', works: 'Værker', chooseWork: 'Vælg værk', bioEyebrow: 'BAG LYDEN', bioTitle: 'Biografi', contactEyebrow: 'LAD OS FINDE LYDEN', contact: 'Kontakt', contactIntro: 'Har du et spørgsmål eller brug for lyddesign til en film, podcast, et computerspil eller musik? Fortæl mig om din produktion og dine ønsker i formularen.',
+    worksEyebrow: 'UDVALGTE PRODUKTIONER', works: 'Værker', chooseWork: 'Vælg værk', seekVideo: 'Vælg tidspunkt i filmen', bioEyebrow: 'BAG LYDEN', bioTitle: 'Biografi', contactEyebrow: 'LAD OS FINDE LYDEN', contact: 'Kontakt', contactIntro: 'Har du et spørgsmål eller brug for lyddesign til en film, podcast, et computerspil eller musik? Fortæl mig om din produktion og dine ønsker i formularen.',
     fields: ['Fornavn', 'Efternavn', 'Nationalitet', 'Telefonnummer', 'E-mail', 'Din besked'], placeholder: 'Fortæl lidt om din produktion, og hvilken lyd du leder efter …', responseTime: 'Du kan typisk forvente svar inden for 3–5 dage.', emailNote: 'Når du har udfyldt formularen åbnes dit mailprogram. OBS. Formularen sendes ikke automatisk, men skal fuldføres i dit eksterne mailprogram.', send: 'Send besked ', thankYou: 'Tak for din henvendelse', more: 'Se mere om arbejdet', workLabel: 'LYDDESIGN', videoSlot: 'Plads til din YouTube-video', loading: 'Indlæser film', play: 'Afspil film', pause: 'Sæt video på pause', resume: 'Fortsæt', videoFallback: 'Her kommer en kort beskrivelse af arbejdet med lyden i denne produktion.'
   },
   en: {
     title: 'Sound Designer', navLabel: 'Main navigation', nav: { forside: 'Home', bio: 'Bio', kontakt: 'Contact', vaerker: 'Work' }, identity: 'SOUND DESIGNER',
     homeEyebrow: 'SOUND DESIGN / PORTFOLIO', homeTitle: ['Turn it up.', 'Listen closer.'], intro: 'Sound design for film, podcasts, video games, and music.', heroLink: 'Listen to the work ', footer: ['FILM · PODCAST · GAMES · MUSIC', 'LISTEN. NOTICE. EXPERIENCE.'],
-    worksEyebrow: 'SELECTED PRODUCTIONS', works: 'Work', chooseWork: 'Choose a project', bioEyebrow: 'BEHIND THE SOUND', bioTitle: 'Biography', contactEyebrow: 'LET’S FIND THE SOUND', contact: 'Contact', contactIntro: 'Have a question or need sound design for a film, podcast, video game, or music? Tell me about your production and what you need in the form.',
+    worksEyebrow: 'SELECTED PRODUCTIONS', works: 'Work', chooseWork: 'Choose a project', seekVideo: 'Choose a point in the film', bioEyebrow: 'BEHIND THE SOUND', bioTitle: 'Biography', contactEyebrow: 'LET’S FIND THE SOUND', contact: 'Contact', contactIntro: 'Have a question or need sound design for a film, podcast, video game, or music? Tell me about your production and what you need in the form.',
     fields: ['First name', 'Last name', 'Nationality', 'Phone number', 'Email', 'Your message'], placeholder: 'Tell me about your production and the sound you are looking for …', responseTime: 'You can usually expect a reply within 3–5 days.', emailNote: 'After completing the form, your email app will open. Note: The form is not sent automatically; you must finish and send it in your external email app.', send: 'Send message ', thankYou: 'Thank you for your message', more: 'Learn more about the work', workLabel: 'SOUND DESIGN', videoSlot: 'Space for your YouTube video', loading: 'Loading film', play: 'Play film', pause: 'Pause video', resume: 'Continue', videoFallback: 'A short description of the sound work for this production will appear here.'
   }
 };
@@ -20,6 +20,10 @@ let language = 'da';
 let activeWorkIndex = 0;
 let youtubePlayer = null;
 let youtubeReady = null;
+let youtubeProgressTimer = null;
+let pauseActiveVideo = null;
+let videoPlayPending = false;
+let videoPausePending = false;
 function loadYouTubeAPI() {
   if (window.YT?.Player) return Promise.resolve();
   if (!youtubeReady) youtubeReady = new Promise((resolve, reject) => {
@@ -38,8 +42,11 @@ function navigate() {
   const target = sections.find(section => `#${section.id}` === location.hash) || sections[0];
   sections.forEach(section => { section.hidden = section !== target; });
   document.querySelector('.linkedin-link').hidden = target.id !== 'forside';
+  document.querySelector('.cv-link').hidden = target.id !== 'forside';
   if (target.id !== 'vaerker') {
     youtubePlayer?.pauseVideo?.();
+    videoPlayPending = false;
+    videoPausePending = false;
     window.portfolioAudio.setVideoPlaying(false);
   }
   navigation.forEach(link => {
@@ -50,13 +57,41 @@ function navigate() {
 }
 window.addEventListener('hashchange', navigate);
 navigate();
+function pauseVideoWhenClickingOutside(event) {
+  if (!pauseActiveVideo || event.target.closest?.('.video-frame')) return;
+  pauseActiveVideo();
+}
+document.addEventListener('pointerdown', pauseVideoWhenClickingOutside, true);
+document.addEventListener('click', pauseVideoWhenClickingOutside, true);
 navigation.forEach(link => {
   link.addEventListener('click', () => window.portfolioAudio.playNavigationCue());
 });
-document.querySelector('.hero-button').addEventListener('pointerenter', event => {
-  if (event.pointerType !== 'touch') window.portfolioAudio.playWorkHoverCue();
+document.querySelector('.hero-button').addEventListener('click', () => {
+  window.portfolioAudio.stopHomepageWorkCue(true);
+  window.portfolioAudio.playLanguageCue();
 });
-document.querySelector('.hero-button').addEventListener('click', () => window.portfolioAudio.playLanguageCue());
+const homepageWorkButton = document.querySelector('.hero-button');
+homepageWorkButton.addEventListener('pointerenter', event => {
+  if (event.pointerType !== 'touch') window.portfolioAudio.playHomepageWorkCue();
+});
+homepageWorkButton.addEventListener('pointerleave', () => window.portfolioAudio.stopHomepageWorkCue());
+const cvButton = document.querySelector('.cv-link');
+cvButton.addEventListener('pointerenter', event => {
+  if (event.pointerType !== 'touch') window.portfolioAudio.playCvCue();
+});
+cvButton.addEventListener('pointerleave', () => window.portfolioAudio.stopCvCue());
+cvButton.addEventListener('click', () => {
+  window.portfolioAudio.stopCvCue(true);
+  window.portfolioAudio.playLanguageCue();
+});
+const linkedInButton = document.querySelector('.linkedin-link');
+linkedInButton.addEventListener('pointerenter', event => {
+  if (event.pointerType !== 'touch') window.portfolioAudio.playLinkedInCue();
+});
+linkedInButton.addEventListener('click', () => {
+  window.portfolioAudio.stopLinkedInCue();
+  window.portfolioAudio.playLanguageCue();
+});
 const wave = document.querySelector('.wave');
 for (let index = 0; index < 75; index++) {
   const bar = document.createElement('i');
@@ -99,7 +134,14 @@ const tabs = document.querySelector('.work-tabs');
 const panel = document.querySelector('#work-panel');
 function showWork(index, focus = false) {
   activeWorkIndex = index;
+  pauseActiveVideo = null;
+  videoPlayPending = false;
+  videoPausePending = false;
   const text = copy[language];
+  if (youtubeProgressTimer) {
+    clearInterval(youtubeProgressTimer);
+    youtubeProgressTimer = null;
+  }
   youtubePlayer?.destroy?.();
   youtubePlayer = null;
   window.portfolioAudio.setVideoPlaying(false);
@@ -115,9 +157,15 @@ function showWork(index, focus = false) {
   video.className = 'video-frame';
   const id = videoId(work.youtubeUrl);
   if (id) {
+    video.classList.add('has-poster');
     const playerHost = document.createElement('div');
     playerHost.className = 'youtube-host';
     video.append(playerHost);
+    const posterCover = document.createElement('div');
+    posterCover.className = 'video-poster-cover';
+    posterCover.setAttribute('aria-hidden', 'true');
+    posterCover.style.setProperty('--thumbnail', `url("https://i.ytimg.com/vi/${id}/hqdefault.jpg")`);
+    video.append(posterCover);
     const launch = document.createElement('button');
     launch.type = 'button';
     launch.className = 'video-launch';
@@ -125,30 +173,95 @@ function showWork(index, focus = false) {
     launch.textContent = text.loading;
     launch.disabled = true;
     video.append(launch);
+    const timeline = document.createElement('div');
+    timeline.className = 'video-timeline';
+    const elapsed = document.createElement('time');
+    elapsed.textContent = '0:00';
+    const seek = document.createElement('input');
+    seek.type = 'range';
+    seek.min = '0';
+    seek.max = '100';
+    seek.step = '0.1';
+    seek.value = '0';
+    seek.disabled = true;
+    seek.setAttribute('aria-label', text.seekVideo);
+    const durationLabel = document.createElement('time');
+    durationLabel.textContent = '0:00';
+    timeline.append(elapsed, seek, durationLabel);
+    video.append(timeline);
+    let isSeeking = false;
+    function formatVideoTime(value) {
+      const seconds = Math.max(0, Math.floor(Number(value) || 0));
+      return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    }
+    function updateTimeline(player) {
+      const duration = Number(player.getDuration?.()) || 0;
+      if (!duration) return;
+      const current = Math.min(Number(player.getCurrentTime?.()) || 0, duration);
+      seek.max = String(duration);
+      seek.disabled = false;
+      durationLabel.textContent = formatVideoTime(duration);
+      if (!isSeeking) {
+        seek.value = String(current);
+        elapsed.textContent = formatVideoTime(current);
+        seek.style.setProperty('--progress', `${current / duration * 100}%`);
+      }
+    }
+    seek.addEventListener('input', () => {
+      isSeeking = true;
+      elapsed.textContent = formatVideoTime(seek.value);
+      const progress = Number(seek.value) / Number(seek.max) * 100;
+      seek.style.setProperty('--progress', `${progress}%`);
+    });
+    seek.addEventListener('change', () => {
+      if (youtubePlayer?.seekTo && !seek.disabled) youtubePlayer.seekTo(Number(seek.value), true);
+      isSeeking = false;
+    });
+    seek.addEventListener('blur', () => { isSeeking = false; });
     let isPlaying = false;
+    let hasStarted = false;
     function setLaunchState(state) {
       isPlaying = state === 'playing';
-      launch.classList.toggle('is-playing', isPlaying);
+      video.classList.toggle('has-poster', !isPlaying);
+      if (state === 'playing' || state === 'paused') {
+        videoPlayPending = false;
+        videoPausePending = false;
+      }
+      if (isPlaying || state === 'paused') hasStarted = true;
+      launch.classList.toggle('is-playing', hasStarted);
       launch.disabled = state === 'loading';
-      launch.textContent = isPlaying ? 'Ⅱ' : state === 'paused' ? text.resume : text.play;
-      launch.setAttribute('aria-label', isPlaying ? text.pause : text.play);
+      launch.innerHTML = isPlaying
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM15 5h4v14h-4z" fill="currentColor"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
+      launch.setAttribute('aria-label', isPlaying ? text.pause : state === 'paused' ? text.resume : text.play);
     }
     loadYouTubeAPI().then(() => {
       if (!playerHost.isConnected) return;
-      const playerVars = { playsinline: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3 };
+      const playerVars = { playsinline: 1, controls: 0, fs: 0, rel: 0, iv_load_policy: 3 };
       if (location.protocol !== 'file:') playerVars.origin = location.origin;
       youtubePlayer = new YT.Player(playerHost, {
         videoId: id,
         playerVars,
         events: {
           onReady(event) {
+            event.target.setVolume(81);
             setLaunchState('ready');
+            updateTimeline(event.target);
+            youtubeProgressTimer = window.setInterval(() => updateTimeline(event.target), 250);
+            pauseActiveVideo = () => {
+              if ((!isPlaying && !videoPlayPending) || videoPausePending) return;
+              videoPausePending = true;
+              videoPlayPending = false;
+              window.portfolioAudio.setVideoPlaying(false);
+              event.target.pauseVideo();
+              setLaunchState('paused');
+            };
             launch.addEventListener('click', () => {
-              if (isPlaying) {
-                event.target.pauseVideo();
-                setLaunchState('paused');
-                window.portfolioAudio.setVideoPlaying(false);
+              if (isPlaying || videoPlayPending) {
+                pauseActiveVideo();
               } else {
+                videoPausePending = false;
+                videoPlayPending = true;
                 window.portfolioAudio.setVideoPlaying(true);
                 event.target.playVideo();
                 setLaunchState('playing');
@@ -159,20 +272,32 @@ function showWork(index, focus = false) {
             if (!playerHost.isConnected) return;
             if (event.data === YT.PlayerState.PLAYING) {
               if (document.querySelector('#vaerker').hidden) { event.target.pauseVideo(); return; }
+              videoPlayPending = false;
+              videoPausePending = false;
               window.portfolioAudio.setVideoPlaying(true);
               setLaunchState('playing');
             } else if ([YT.PlayerState.PAUSED, YT.PlayerState.ENDED, YT.PlayerState.CUED].includes(event.data)) {
+              videoPlayPending = false;
+              videoPausePending = false;
               window.portfolioAudio.setVideoPlaying(false);
               setLaunchState(event.data === YT.PlayerState.PAUSED ? 'paused' : 'ready');
             }
           },
-          onError() { window.portfolioAudio.setVideoPlaying(false); setLaunchState('ready'); }
+          onError() {
+            if (youtubeProgressTimer) { clearInterval(youtubeProgressTimer); youtubeProgressTimer = null; }
+            videoPlayPending = false;
+            videoPausePending = false;
+            seek.disabled = true;
+            window.portfolioAudio.setVideoPlaying(false);
+            setLaunchState('ready');
+          }
         }
       });
     }).catch(() => {
       // Hide the non-coordinated player instead of allowing competing audio.
       playerHost.remove();
       launch.remove();
+      timeline.remove();
       const message = document.createElement('p');
       message.className = 'video-placeholder';
       message.textContent = 'Videoafspilleren kunne ikke indlæses. Genindlæs siden for at prøve igen.';
@@ -223,7 +348,7 @@ content.works.forEach((work, index) => {
   tab.setAttribute('aria-controls', 'work-panel');
   tab.textContent = work.title;
   tab.setAttribute('aria-label', work.title);
-  tab.addEventListener('click', () => showWork(index));
+  tab.addEventListener('click', () => { window.portfolioAudio.playWorkSelectCue(); showWork(index); });
   tab.addEventListener('keydown', event => {
     let next;
     if (event.key === 'ArrowRight') next = (index + 1) % content.works.length;
@@ -264,6 +389,10 @@ function applyLanguage() {
   document.querySelector('.response-time').textContent = text.responseTime;
   document.querySelector('#email-note').textContent = text.emailNote;
   document.querySelector('#contact-form .button').firstChild.textContent = text.send;
+  cvButton.href = language === 'en'
+    ? 'assets/files/Jens_Korsgaard_CV_EN.pdf'
+    : 'assets/files/Jens_Korsgaard_CV.pdf';
+  cvButton.setAttribute('aria-label', language === 'en' ? 'Open Jens Korsgaard’s CV as a PDF' : 'Åbn Jens Korsgaards CV som PDF');
   const form = document.querySelector('#contact-form');
   const submitButton = form.querySelector('[type="submit"]');
   submitButton.firstChild.textContent = form.dataset.sent === 'true' ? text.thankYou : text.send;
@@ -279,12 +408,20 @@ languageToggle.addEventListener('click', () => {
   language = language === 'da' ? 'en' : 'da';
   applyLanguage();
 });
-document.querySelector('#contact-form .button').addEventListener('click', () => window.portfolioAudio.playLanguageCue());
-document.querySelector('#contact-form').addEventListener('submit', event => {
+const contactForm = document.querySelector('#contact-form');
+const contactSubmitButton = contactForm.querySelector('[type="submit"]');
+contactSubmitButton.addEventListener('click', () => {
+  if (!contactForm.checkValidity()) window.portfolioAudio.playWorkHoverCue();
+});
+contactForm.addEventListener('submit', event => {
   event.preventDefault();
   const form = event.currentTarget;
+  if (!form.reportValidity()) {
+    window.portfolioAudio.playWorkHoverCue();
+    return;
+  }
+  window.portfolioAudio.playSentCue();
   const text = copy[language];
-  const status = document.querySelector('#form-status');
   const submitButton = form.querySelector('[type="submit"]');
   const values = new FormData(form);
   const fields = ['firstName', 'lastName', 'nationality', 'phone', 'email', 'message'];
@@ -293,9 +430,8 @@ document.querySelector('#contact-form').addEventListener('submit', event => {
   const mailto = new URL('mailto:jensbkorsgaard@gmail.com');
   mailto.searchParams.set('subject', subject);
   mailto.searchParams.set('body', body);
-  window.location.assign(mailto.href);
+  window.location.assign(mailto.href.replace(/\+/g, '%20'));
   submitButton.firstChild.textContent = text.thankYou;
   submitButton.querySelector('span')?.remove();
   form.dataset.sent = 'true';
-  status.textContent = text.thankYou;
 });

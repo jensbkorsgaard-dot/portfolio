@@ -8,7 +8,7 @@
   toggle.setAttribute('aria-label', 'Slå hjemmesidens lyd til');
   document.body.append(toggle);
   const tracks = {};
-  for (const [name, file] of Object.entries({ background: 'forside-lyd', stab: 'mus-stab', arp: 'arp' })) {
+  for (const [name, file] of Object.entries({ background: 'master-seamless', stab: 'mus-stab', arp: 'arp' })) {
     const audio = document.createElement('audio');
     audio.src = `assets/audio/${file}.wav`;
     audio.preload = 'auto';
@@ -19,7 +19,7 @@
     tracks[name] = audio;
   }
   const navigationSound = document.createElement('audio');
-  navigationSound.src = 'assets/audio/click.wav';
+  navigationSound.src = 'assets/audio/overstclick.wav';
   navigationSound.preload = 'auto';
   navigationSound.hidden = true;
   document.body.append(navigationSound);
@@ -28,33 +28,43 @@
   workHoverSound.preload = 'auto';
   workHoverSound.hidden = true;
   document.body.append(workHoverSound);
+  const sentSound = document.createElement('audio');
+  sentSound.src = 'assets/audio/sendt.wav';
+  sentSound.preload = 'auto';
+  sentSound.hidden = true;
+  document.body.append(sentSound);
   const languageClickSound = document.createElement('audio');
   languageClickSound.src = 'assets/audio/nyt-click-dk-en.wav';
   languageClickSound.preload = 'auto';
   languageClickSound.hidden = true;
   document.body.append(languageClickSound);
-  const backgroundAlternate = document.createElement('audio');
-  backgroundAlternate.src = tracks.background.src;
-  backgroundAlternate.preload = 'auto';
-  backgroundAlternate.loop = true;
-  backgroundAlternate.volume = 0;
-  backgroundAlternate.hidden = true;
-  document.body.append(backgroundAlternate);
+  const workSelectSound = new Audio('assets/audio/vaerkselect.wav');
+  workSelectSound.preload = 'auto';
+  workSelectSound.loop = false;
+  workSelectSound.hidden = true;
+  document.body.append(workSelectSound);
+  const homepageWorkSound = new Audio('assets/audio/vaerkknappen.wav');
+  const cvSound = new Audio('assets/audio/cver.wav');
+  const linkedInSound = new Audio('assets/audio/linker.wav');
+  linkedInSound.loop = false;
+  for (const audio of [homepageWorkSound, cvSound, linkedInSound]) {
+    audio.preload = 'auto';
+    audio.loop = false;
+    audio.hidden = true;
+    document.body.append(audio);
+  }
+  // master.wav is a seamless loop: replay the same source directly at its
+  // endpoint, without a crossfade, overlap, or fade at the loop boundary.
   tracks.background.loop = true;
-  let backgroundPrimary = tracks.background;
-  let backgroundSecondary = backgroundAlternate;
-  let backgroundLevel = .44;
-  let backgroundCrossfadeStart = 0;
-  let backgroundCrossfadeFrame = 0;
-  let backgroundCrossfading = false;
-  const backgroundCrossfadeDuration = 3.05;
-  const backgroundEdgeFadeDuration = .05;
+  const backgroundPrimary = tracks.background;
+  let backgroundLevel = .374;
+  const otherSoundVolumeScale = .81;
+  const stabVolumeScale = otherSoundVolumeScale * 1.1;
   tracks.background.volume = backgroundLevel;
-  tracks.stab.volume = .0232470703125;
+  tracks.stab.volume = .0232470703125 * stabVolumeScale;
   tracks.arp.volume = 0;
   let enabled = false;
   let videoPlaying = false;
-  let backgroundPausedForVideo = false;
   let hovering = false;
   let fadeFrame = 0;
   let backgroundFadeFrame = 0;
@@ -62,76 +72,86 @@
   let failed = false;
   let navigationAudioContext = null;
   let navigationGain = null;
+  let backgroundAudioContext = null;
+  let backgroundGain = null;
+  let backgroundBuffer = null;
+  let backgroundBufferPromise = null;
+  let backgroundSource = null;
+  let backgroundOffset = 0;
+  let backgroundStartedAt = 0;
+  const backgroundBytesPromise = fetch('assets/audio/master-seamless.wav')
+    .then(response => {
+      if (!response.ok) throw new Error('Background audio could not load');
+      return response.arrayBuffer();
+    })
+    .catch(() => null);
   const wave = document.querySelector('.wave');
-  function updateBackgroundVolumes(progress = 0) {
-    if (backgroundCrossfading) {
-      const crossfadeProgress = Math.max(0, Math.min(1, progress));
-      const angle = crossfadeProgress * Math.PI / 2;
-      // A tiny edge envelope removes abrupt sample-boundary clicks while the
-      // longer equal-power crossfade keeps the perceived level continuous.
-      const edgeIn = Math.min(1, crossfadeProgress * backgroundCrossfadeDuration / backgroundEdgeFadeDuration);
-      const edgeOut = Math.min(1, (1 - crossfadeProgress) * backgroundCrossfadeDuration / backgroundEdgeFadeDuration);
-      backgroundPrimary.volume = backgroundLevel * Math.cos(angle) * edgeOut;
-      backgroundSecondary.volume = backgroundLevel * Math.sin(angle) * edgeIn;
-    } else {
-      backgroundPrimary.volume = backgroundLevel;
-      backgroundSecondary.volume = 0;
+  function updateBackgroundVolumes() {
+    if (backgroundGain && backgroundAudioContext) {
+      backgroundGain.gain.setValueAtTime(backgroundLevel, backgroundAudioContext.currentTime);
     }
+    backgroundPrimary.volume = backgroundLevel;
   }
-  function finishBackgroundCrossfade() {
-    cancelAnimationFrame(backgroundCrossfadeFrame);
-    const outgoing = backgroundPrimary;
-    backgroundPrimary = backgroundSecondary;
-    backgroundSecondary = outgoing;
-    outgoing.pause();
-    outgoing.currentTime = 0;
-    backgroundCrossfading = false;
-    updateBackgroundVolumes();
+  async function loadBackgroundBuffer() {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    if (!backgroundAudioContext) {
+      backgroundAudioContext = new AudioContext();
+      backgroundGain = backgroundAudioContext.createGain();
+      backgroundGain.gain.value = backgroundLevel;
+      backgroundGain.connect(backgroundAudioContext.destination);
+    }
+    if (backgroundAudioContext.state === 'suspended') {
+      backgroundAudioContext.resume().catch(() => {});
+    }
+    if (!backgroundBufferPromise) {
+      backgroundBufferPromise = backgroundBytesPromise
+        .then(bytes => bytes ? backgroundAudioContext.decodeAudioData(bytes.slice(0)) : null)
+        .then(buffer => { backgroundBuffer = buffer; return buffer; })
+        .catch(() => null);
+    }
+    return backgroundBuffer || backgroundBufferPromise;
   }
-  function animateBackgroundCrossfade() {
-    cancelAnimationFrame(backgroundCrossfadeFrame);
-    if (!backgroundCrossfading || backgroundPrimary.paused || backgroundSecondary.paused) return;
-    // Drive progress from the incoming copy's own clock so a slightly late
-    // timeupdate on the outgoing track cannot make its native loop jump the
-    // crossfade backward at the seam.
-    const progress = Math.max(0, Math.min(1, backgroundSecondary.currentTime / backgroundCrossfadeDuration));
-    updateBackgroundVolumes(progress);
-    if (progress >= 1) finishBackgroundCrossfade();
-    else backgroundCrossfadeFrame = requestAnimationFrame(animateBackgroundCrossfade);
-  }
-  function maybeStartBackgroundCrossfade(event) {
-    if (event && event.currentTarget !== backgroundPrimary) return;
-    if (!enabled || videoPlaying || document.hidden || location.hash === '#vaerker' || backgroundCrossfading) return;
-    if (!Number.isFinite(backgroundPrimary.duration) || backgroundPrimary.duration - backgroundPrimary.currentTime > backgroundCrossfadeDuration) return;
-    if (backgroundSecondary.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
-    const outgoing = backgroundPrimary;
-    const incoming = backgroundSecondary;
-    incoming.currentTime = 0;
-    incoming.volume = 0;
-    incoming.play().then(() => {
-      if (backgroundPrimary !== outgoing || !enabled || videoPlaying || document.hidden || location.hash === '#vaerker') {
-        incoming.pause();
-        return;
+  async function startBackgroundPlayback() {
+    if (backgroundSource) {
+      if (backgroundAudioContext?.state === 'suspended') {
+        await backgroundAudioContext.resume().catch(() => {});
       }
-      backgroundCrossfading = true;
-      // Begin with precisely the overlap remaining before the source's end.
-      // The tiny edge envelope is nested inside this crossfade.
-      backgroundCrossfadeStart = outgoing.currentTime;
-      updateBackgroundVolumes(0);
-      animateBackgroundCrossfade();
-    }).catch(() => {});
-  }
-  tracks.background.addEventListener('timeupdate', maybeStartBackgroundCrossfade);
-  tracks.background.addEventListener('canplay', maybeStartBackgroundCrossfade);
-  backgroundAlternate.addEventListener('timeupdate', maybeStartBackgroundCrossfade);
-  backgroundAlternate.addEventListener('canplay', maybeStartBackgroundCrossfade);
-  function playBackground() {
-    play(backgroundPrimary);
-    if (backgroundCrossfading) {
-      const incoming = backgroundSecondary;
-      incoming.play().catch(() => {});
+      return;
     }
-    animateBackgroundCrossfade();
+    const buffer = await loadBackgroundBuffer();
+    if (!enabled || document.hidden || videoPlaying) return;
+    if (buffer && backgroundAudioContext && backgroundGain) {
+      if (backgroundAudioContext.state === 'suspended') await backgroundAudioContext.resume().catch(() => {});
+      if (!enabled || document.hidden || videoPlaying || backgroundSource) return;
+      const source = backgroundAudioContext.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.loopStart = 0;
+      source.loopEnd = buffer.duration;
+      source.connect(backgroundGain);
+      backgroundStartedAt = backgroundAudioContext.currentTime;
+      backgroundSource = source;
+      source.start(0, backgroundOffset % buffer.duration);
+      return;
+    }
+    if (backgroundPrimary.paused) {
+      await backgroundPrimary.play().catch(() => {});
+      if (!enabled || document.hidden || videoPlaying) backgroundPrimary.pause();
+    }
+  }
+  function pauseBackgroundPlayback() {
+    if (!backgroundSource || !backgroundBuffer || !backgroundAudioContext) {
+      backgroundPrimary.pause();
+      return;
+    }
+    const duration = backgroundBuffer.duration;
+    backgroundOffset = (backgroundOffset + backgroundAudioContext.currentTime - backgroundStartedAt) % duration;
+    const source = backgroundSource;
+    backgroundSource = null;
+    source.onended = null;
+    source.stop();
+    source.disconnect();
   }
   function label() {
     const english = document.documentElement.lang === 'en';
@@ -146,6 +166,7 @@
       if (version !== generation || !enabled || document.hidden || videoPlaying) audio.pause();
     }).catch(error => {
       if (error.name === 'AbortError' || version !== generation) return;
+      if (audio === backgroundPrimary) return;
       failed = true;
       enabled = false;
       sync();
@@ -154,6 +175,7 @@
   }
   function fadeArp(target) {
     cancelAnimationFrame(fadeFrame);
+    target *= otherSoundVolumeScale;
     const startVolume = tracks.arp.volume;
     const started = performance.now();
     const duration = target ? 180 : 500;
@@ -169,44 +191,51 @@
     cancelAnimationFrame(backgroundFadeFrame);
     const startVolume = backgroundLevel;
     const started = performance.now();
+    const automateGain = Boolean(backgroundSource && backgroundGain && backgroundAudioContext);
+    if (automateGain) {
+      const now = backgroundAudioContext.currentTime;
+      backgroundGain.gain.cancelScheduledValues(now);
+      backgroundGain.gain.setValueAtTime(startVolume, now);
+      backgroundGain.gain.linearRampToValueAtTime(target, now + duration / 1000);
+    }
     function step(now) {
       const progress = Math.min(1, (now - started) / duration);
       backgroundLevel = startVolume + (target - startVolume) * progress;
-      updateBackgroundVolumes(backgroundCrossfading && backgroundPrimary.duration > 0
-        ? backgroundSecondary.currentTime / backgroundCrossfadeDuration
-        : 0);
+      if (!automateGain) updateBackgroundVolumes();
       if (progress < 1) backgroundFadeFrame = requestAnimationFrame(step);
       else if (pauseAtEnd && target === 0) {
-        backgroundPrimary.pause();
-        backgroundSecondary.pause();
+        pauseBackgroundPlayback();
       }
     }
     backgroundFadeFrame = requestAnimationFrame(step);
   }
-  function resumeBackground() {
-    if (!enabled || document.hidden || videoPlaying || location.hash === '#vaerker') return;
-    cancelAnimationFrame(backgroundFadeFrame);
-    backgroundLevel = 0;
-    updateBackgroundVolumes();
-    playBackground();
-    fadeBackground(.44);
+  function backgroundTargetVolume() {
+    if (!location.hash || location.hash === '#forside') return .374;
+    return location.hash === '#vaerker' ? .176 : .22;
   }
-  function sync() {
+  function resumeBackgroundAfterVideo(duration = 1500) {
+    if (!enabled || document.hidden || videoPlaying) return;
+    startBackgroundPlayback()
+      .then(() => {
+        if (!enabled || document.hidden || videoPlaying) return;
+        fadeBackground(backgroundTargetVolume(), false, duration);
+      })
+      .catch(() => {
+        // A background-track resume failure must not change the user's sound-toggle state.
+      });
+  }
+  function sync(backgroundTransitionDuration = 500) {
     const audible = enabled && !videoPlaying && !document.hidden;
-    const backgroundAudible = audible && location.hash !== '#vaerker';
-    if (backgroundAudible) {
-      const resumeWithFade = backgroundPrimary.paused && backgroundLevel < .44;
-      playBackground();
-      const homeWaveActive = hovering && (!location.hash || location.hash === '#forside');
-      const targetVolume = homeWaveActive ? .16 : .44;
-      if (resumeWithFade || Math.abs(backgroundLevel - targetVolume) > .005) fadeBackground(targetVolume);
-    } else if (enabled && !document.hidden) {
-      fadeBackground(0, true);
+    if (audible) {
+      // Resume paused background tracks before fading their level back up.
+      // This path is shared by video pause, navigation, and the sound toggle.
+      resumeBackgroundAfterVideo(backgroundTransitionDuration);
+    } else if (!document.hidden) {
+      fadeBackground(0, true, backgroundTransitionDuration);
     } else {
       cancelAnimationFrame(backgroundFadeFrame);
-      backgroundPrimary.pause();
-      backgroundSecondary.pause();
-      backgroundLevel = .44;
+      pauseBackgroundPlayback();
+      backgroundLevel = .374;
       updateBackgroundVolumes();
     }
     if (!audible) {
@@ -230,19 +259,117 @@
       source.connect(navigationGain).connect(navigationAudioContext.destination);
     }
     navigationAudioContext?.resume().catch(() => {});
-    playCue(navigationSound, 1);
+    // Match the navigation click's measured RMS to the DA/EN click cue.
+    playCue(navigationSound, .3718);
   }
   function playWorkHoverCue() {
     playCue(workHoverSound, .45);
   }
+  function playSentCue() {
+    playCue(sentSound, .45);
+  }
   function playLanguageCue() {
     playCue(languageClickSound, .486);
+  }
+  const homepageWorkVolume = .495 * otherSoundVolumeScale;
+  let homepageWorkFadeFrame = 0;
+  function playHomepageWorkCue() {
+    cancelAnimationFrame(homepageWorkFadeFrame);
+    homepageWorkSound.pause();
+    homepageWorkSound.currentTime = 0;
+    homepageWorkSound.volume = homepageWorkVolume;
+    homepageWorkSound.loop = false;
+    homepageWorkSound.play().catch(() => {});
+  }
+  function stopHomepageWorkCue(immediate = false) {
+    if (homepageWorkSound.paused) return;
+    cancelAnimationFrame(homepageWorkFadeFrame);
+    if (immediate) {
+      homepageWorkSound.pause();
+      homepageWorkSound.currentTime = 0;
+      homepageWorkSound.volume = homepageWorkVolume;
+      return;
+    }
+    const startVolume = homepageWorkSound.volume;
+    const started = performance.now();
+    function fade(now) {
+      const progress = Math.min(1, (now - started) / 1500);
+      homepageWorkSound.volume = startVolume * (1 - progress);
+      if (progress < 1 && !homepageWorkSound.paused) homepageWorkFadeFrame = requestAnimationFrame(fade);
+      else {
+        homepageWorkSound.pause();
+        homepageWorkSound.currentTime = 0;
+        homepageWorkSound.volume = homepageWorkVolume;
+      }
+    }
+    homepageWorkFadeFrame = requestAnimationFrame(fade);
+  }
+  const hoverCueVolume = .45 * otherSoundVolumeScale;
+  const hoverCueStates = new Map();
+  function playHoverLogoCue(audio, fadeInDuration = 0) {
+    if (document.hidden) return;
+    const state = hoverCueStates.get(audio) || { frame: 0 };
+    cancelAnimationFrame(state.frame);
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = fadeInDuration ? 0 : hoverCueVolume;
+    audio.playbackRate = 1;
+    audio.loop = false;
+    audio.play().catch(() => {});
+    if (fadeInDuration) {
+      const started = performance.now();
+      function fadeIn(now) {
+        const progress = Math.min(1, (now - started) / fadeInDuration);
+        audio.volume = hoverCueVolume * progress;
+        if (progress < 1 && !audio.paused) state.frame = requestAnimationFrame(fadeIn);
+        else state.frame = 0;
+      }
+      state.frame = requestAnimationFrame(fadeIn);
+    }
+    hoverCueStates.set(audio, state);
+  }
+  function stopHoverLogoCue(audio, immediate = false) {
+    const state = hoverCueStates.get(audio);
+    if (!state) return;
+    cancelAnimationFrame(state.frame);
+    if (immediate) {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.volume = hoverCueVolume;
+      state.frame = 0;
+      return;
+    }
+    if (audio.paused) return;
+    const startVolume = audio.volume;
+    const started = performance.now();
+    function fadeOut(now) {
+      const progress = Math.min(1, (now - started) / 1000);
+      audio.volume = startVolume * (1 - progress);
+      if (progress < 1 && !audio.paused) state.frame = requestAnimationFrame(fadeOut);
+      else {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.volume = hoverCueVolume;
+        state.frame = 0;
+      }
+    }
+    state.frame = requestAnimationFrame(fadeOut);
+  }
+  function playCvCue() { playHoverLogoCue(cvSound); }
+  function stopCvCue(immediate = false) { stopHoverLogoCue(cvSound, immediate); }
+  const linkedInCueVolume = .9;
+  function playLinkedInCue() { playCue(linkedInSound, linkedInCueVolume); }
+  function playWorkSelectCue() { playCue(workSelectSound, .45); }
+  function stopLinkedInCue() {
+    linkedInSound.pause();
+    linkedInSound.currentTime = 0;
+    linkedInSound.volume = linkedInCueVolume;
   }
   function playCue(audio, volume) {
     if (document.hidden) return;
     audio.pause();
     audio.currentTime = 0;
-    audio.volume = volume;
+    audio.volume = volume * (audio === tracks.stab ? stabVolumeScale : otherSoundVolumeScale);
     audio.playbackRate = 1;
     audio.play().catch(() => {});
   }
@@ -251,7 +378,7 @@
     failed = false;
     // Prime all elements during a user gesture for browsers with strict autoplay rules.
     if (enabled) {
-      for (const audio of [tracks.stab, tracks.arp, navigationSound, workHoverSound, languageClickSound]) {
+      for (const audio of [tracks.stab, tracks.arp, navigationSound, workHoverSound, sentSound, languageClickSound, homepageWorkSound, cvSound, linkedInSound, workSelectSound]) {
         audio.muted = true;
         const attempt = audio.play();
         audio.pause();
@@ -261,7 +388,7 @@
       }
     }
     label();
-    sync();
+    sync(1500);
   });
   wave.addEventListener('pointerenter', event => {
     if (event.pointerType === 'touch' || hovering) return;
@@ -275,16 +402,24 @@
   document.addEventListener('portfolio-languagechange', label);
   window.portfolioAudio = {
     setVideoPlaying(playing) {
-      if (playing) backgroundPausedForVideo = true;
-      videoPlaying = playing;
-      sync();
-      if (!playing && backgroundPausedForVideo) {
-        resumeBackground();
-        backgroundPausedForVideo = false;
+      if (videoPlaying === playing) {
+        if (!playing) resumeBackgroundAfterVideo(1500);
+        return;
       }
+      videoPlaying = playing;
+      document.body.classList.toggle('video-playing', playing);
+      sync(1500);
     },
     playNavigationCue,
     playWorkHoverCue,
-    playLanguageCue
+    playSentCue,
+    playLanguageCue,
+    playHomepageWorkCue,
+    stopHomepageWorkCue,
+    playCvCue,
+    stopCvCue,
+    playLinkedInCue,
+    stopLinkedInCue,
+    playWorkSelectCue
   };
 })();
