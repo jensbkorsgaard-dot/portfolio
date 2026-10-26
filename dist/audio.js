@@ -33,6 +33,14 @@
   sentSound.preload = 'auto';
   sentSound.hidden = true;
   document.body.append(sentSound);
+  const videoStartSound = new Audio('assets/audio/sluk-go.wav');
+  const videoPauseSound = new Audio('assets/audio/taend-go.wav');
+  for (const audio of [videoStartSound, videoPauseSound]) {
+    audio.preload = 'auto';
+    audio.loop = false;
+    audio.hidden = true;
+    document.body.append(audio);
+  }
   const languageClickSound = document.createElement('audio');
   languageClickSound.src = 'assets/audio/nyt-click-dk-en.wav';
   languageClickSound.preload = 'auto';
@@ -268,6 +276,12 @@
   function playSentCue() {
     playCue(sentSound, .45);
   }
+  function playVideoStartCue() {
+    if (location.hash === '#vaerker') playCue(videoStartSound, .45 * .65 * .9 * .9 * 1.13);
+  }
+  function playVideoPauseCue() {
+    if (location.hash === '#vaerker') playCue(videoPauseSound, .45 * .65 * .9 * .9 * 1.13);
+  }
   function playLanguageCue() {
     playCue(languageClickSound, .486);
   }
@@ -359,7 +373,7 @@
   function stopCvCue(immediate = false) { stopHoverLogoCue(cvSound, immediate); }
   const linkedInCueVolume = .9;
   function playLinkedInCue() { playCue(linkedInSound, linkedInCueVolume); }
-  function playWorkSelectCue() { playCue(workSelectSound, .45); }
+  function playWorkSelectCue() { playCue(workSelectSound, .45 * .95); }
   function stopLinkedInCue() {
     linkedInSound.pause();
     linkedInSound.currentTime = 0;
@@ -378,7 +392,7 @@
     failed = false;
     // Prime all elements during a user gesture for browsers with strict autoplay rules.
     if (enabled) {
-      for (const audio of [tracks.stab, tracks.arp, navigationSound, workHoverSound, sentSound, languageClickSound, homepageWorkSound, cvSound, linkedInSound, workSelectSound]) {
+      for (const audio of [tracks.stab, tracks.arp, navigationSound, workHoverSound, sentSound, videoStartSound, videoPauseSound, languageClickSound, homepageWorkSound, cvSound, linkedInSound, workSelectSound]) {
         audio.muted = true;
         const attempt = audio.play();
         audio.pause();
@@ -401,12 +415,14 @@
   document.addEventListener('visibilitychange', sync);
   document.addEventListener('portfolio-languagechange', label);
   window.portfolioAudio = {
-    setVideoPlaying(playing) {
+    setVideoPlaying(playing, transitionCue) {
       if (videoPlaying === playing) {
         if (!playing) resumeBackgroundAfterVideo(1500);
         return;
       }
       videoPlaying = playing;
+      if (transitionCue === 'play') playVideoStartCue();
+      else if (transitionCue === 'pause') playVideoPauseCue();
       document.body.classList.toggle('video-playing', playing);
       sync(1500);
     },

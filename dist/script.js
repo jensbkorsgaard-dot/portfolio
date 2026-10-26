@@ -252,7 +252,7 @@ function showWork(index, focus = false) {
               if ((!isPlaying && !videoPlayPending) || videoPausePending) return;
               videoPausePending = true;
               videoPlayPending = false;
-              window.portfolioAudio.setVideoPlaying(false);
+              window.portfolioAudio.setVideoPlaying(false, 'pause');
               event.target.pauseVideo();
               setLaunchState('paused');
             };
@@ -262,7 +262,7 @@ function showWork(index, focus = false) {
               } else {
                 videoPausePending = false;
                 videoPlayPending = true;
-                window.portfolioAudio.setVideoPlaying(true);
+                window.portfolioAudio.setVideoPlaying(true, 'play');
                 event.target.playVideo();
                 setLaunchState('playing');
               }
@@ -274,12 +274,12 @@ function showWork(index, focus = false) {
               if (document.querySelector('#vaerker').hidden) { event.target.pauseVideo(); return; }
               videoPlayPending = false;
               videoPausePending = false;
-              window.portfolioAudio.setVideoPlaying(true);
+              window.portfolioAudio.setVideoPlaying(true, 'play');
               setLaunchState('playing');
             } else if ([YT.PlayerState.PAUSED, YT.PlayerState.ENDED, YT.PlayerState.CUED].includes(event.data)) {
               videoPlayPending = false;
               videoPausePending = false;
-              window.portfolioAudio.setVideoPlaying(false);
+              window.portfolioAudio.setVideoPlaying(false, event.data === YT.PlayerState.PAUSED ? 'pause' : undefined);
               setLaunchState(event.data === YT.PlayerState.PAUSED ? 'paused' : 'ready');
             }
           },
@@ -410,12 +410,33 @@ languageToggle.addEventListener('click', () => {
 });
 const contactForm = document.querySelector('#contact-form');
 const contactSubmitButton = contactForm.querySelector('[type="submit"]');
+function setContactFieldValidationMessage(field) {
+  field.setCustomValidity('');
+  if (field.validity.valueMissing) {
+    field.setCustomValidity(language === 'en' ? 'Please fill out this field.' : 'Udfyld dette felt.');
+  } else if (field.validity.typeMismatch && field.type === 'email') {
+    field.setCustomValidity(language === 'en' ? 'Please enter a valid email address.' : 'Indtast en gyldig e-mailadresse.');
+  }
+}
+function refreshContactValidationMessages() {
+  contactForm.querySelectorAll('input, textarea').forEach(setContactFieldValidationMessage);
+}
+contactForm.addEventListener('input', event => {
+  if (event.target.matches('input, textarea')) setContactFieldValidationMessage(event.target);
+});
+contactForm.addEventListener('invalid', event => {
+  setContactFieldValidationMessage(event.target);
+}, true);
+document.addEventListener('portfolio-languagechange', refreshContactValidationMessages);
+refreshContactValidationMessages();
 contactSubmitButton.addEventListener('click', () => {
+  refreshContactValidationMessages();
   if (!contactForm.checkValidity()) window.portfolioAudio.playWorkHoverCue();
 });
 contactForm.addEventListener('submit', event => {
   event.preventDefault();
   const form = event.currentTarget;
+  refreshContactValidationMessages();
   if (!form.reportValidity()) {
     window.portfolioAudio.playWorkHoverCue();
     return;
