@@ -23,6 +23,7 @@
   navigationSound.preload = 'auto';
   navigationSound.hidden = true;
   document.body.append(navigationSound);
+  navigationSound.load();
   const workHoverSound = document.createElement('audio');
   workHoverSound.src = 'assets/audio/lyt-til-vaerkerne.wav';
   workHoverSound.preload = 'auto';
@@ -78,8 +79,6 @@
   let backgroundFadeFrame = 0;
   let generation = 0;
   let failed = false;
-  let navigationAudioContext = null;
-  let navigationGain = null;
   let backgroundAudioContext = null;
   let backgroundGain = null;
   let backgroundBuffer = null;
@@ -258,17 +257,9 @@
     } else if (audible) fadeArp(0);
   }
   function playNavigationCue() {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!navigationGain && AudioContext) {
-      navigationAudioContext = new AudioContext();
-      const source = navigationAudioContext.createMediaElementSource(navigationSound);
-      navigationGain = navigationAudioContext.createGain();
-      navigationGain.gain.value = 1.17;
-      source.connect(navigationGain).connect(navigationAudioContext.destination);
-    }
-    navigationAudioContext?.resume().catch(() => {});
-    // Match the navigation click's measured RMS to the DA/EN click cue.
-    playCue(navigationSound, .3718);
+    // Play directly from the preloaded element so AudioContext startup cannot
+    // delay the navigation click. Compensate for the former Web Audio gain.
+    playCue(navigationSound, .3718 * 1.17);
   }
   function playWorkHoverCue() {
     playCue(workHoverSound, .45);
