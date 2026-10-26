@@ -218,7 +218,7 @@
     backgroundFadeFrame = requestAnimationFrame(step);
   }
   function backgroundTargetVolume() {
-    if (!location.hash || location.hash === '#forside') return .374;
+    if (!location.hash || location.hash === '#forside') return .374 * .92;
     return location.hash === '#vaerker' ? .176 : .22;
   }
   function resumeBackgroundAfterVideo(duration = 1500) {
